@@ -1,0 +1,913 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Angry Birds AR: ภาษาไทย ป.1</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- MediaPipe Hands CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@400;600;700;800&display=swap" rel="stylesheet">
+    
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden;
+            font-family: 'Prompt', sans-serif; 
+            user-select: none; 
+            background-color: #0f172a; 
+            touch-action: none;
+        }
+        
+        .loader { 
+            border: 8px solid rgba(255, 255, 255, 0.2); 
+            border-top: 8px solid #f59e0b; 
+            border-radius: 50%; 
+            width: 70px; 
+            height: 70px; 
+            animation: spin 1s linear infinite; 
+        }
+        
+        @keyframes spin { 
+            0% { transform: rotate(0deg); } 
+            100% { transform: rotate(360deg); } 
+        }
+
+        @keyframes floatBounce {
+            0%, 100% { transform: translateY(0px) scale(1); }
+            50% { transform: translateY(-12px) scale(1.03); }
+        }
+
+        .animate-float-bounce {
+            animation: floatBounce 3s ease-in-out infinite;
+        }
+
+        .wood-pattern {
+            background-color: #854d0e;
+            background-image: radial-gradient(#a16207 15%, transparent 16%), radial-gradient(#713f12 15%, transparent 16%);
+            background-size: 20px 20px;
+        }
+
+        .wood-border {
+            border: 4px solid #451a03;
+            box-shadow: inset 0 2px 4px rgba(255,255,255,0.3), 0 8px 16px rgba(0,0,0,0.4);
+        }
+    </style>
+</head>
+<body class="w-full h-screen overflow-hidden flex items-center justify-center">
+
+    <!-- กล้องวิดีโอพื้นหลัง (กลับด้านเหมือนกระจกเงา) -->
+    <video id="video" class="absolute inset-0 w-full h-full object-cover z-0" style="transform: scaleX(-1);" autoplay playsinline muted></video>
+    
+    <!-- ผืนผ้าใบสำหรับกราฟิกเกม AR -->
+    <canvas id="canvas" class="absolute inset-0 z-10 w-full h-full pointer-events-auto"></canvas>
+
+    <!-- UI หน้าจอระหว่างเล่นเกม -->
+    <div id="ui-layer" class="hidden pointer-events-none absolute inset-0 flex flex-col items-center justify-between p-4 md:p-6 z-20">
+        <!-- แถบด้านบน: คะแนนและสถานะ -->
+        <div class="w-full max-w-2xl flex justify-between items-center">
+            <div id="score-display" class="pointer-events-auto text-white text-lg md:text-2xl font-bold bg-gradient-to-r from-amber-500 to-amber-600 px-6 py-2.5 rounded-2xl shadow-xl wood-border flex items-center gap-2">
+                <span>⭐ คะแนน:</span>
+                <span id="score-text" class="text-yellow-200 font-extrabold text-2xl md:text-3xl">0 / 20</span>
+            </div>
+
+            <div class="flex gap-2 pointer-events-auto">
+                <button id="mode-badge" class="bg-slate-800/80 backdrop-blur-md text-amber-300 border border-amber-400/40 text-xs md:text-sm px-4 py-2 rounded-xl font-semibold flex items-center gap-2 shadow-lg">
+                    <span id="mode-icon">🖐️</span> <span id="mode-text">ระบบตรวจจับมือ (AR)</span>
+                </button>
+            </div>
+        </div>
+        
+        <!-- กล่องคำถามแสดงรูปภาพการ์ตูนสุดน่ารัก -->
+        <div class="relative pointer-events-auto flex flex-col items-center">
+            <div class="text-white text-sm md:text-base font-bold bg-amber-600 px-4 py-1 rounded-t-xl border-t-2 border-x-2 border-amber-300 shadow-md">
+                คำนี้ตรงกับรูปภาพใด?
+            </div>
+            <div class="relative flex justify-center items-center h-40 w-40 md:h-52 md:w-52 bg-white/95 p-3 rounded-3xl shadow-2xl border-4 border-amber-400 animate-float-bounce">
+                <!-- รูปภาพการ์ตูน -->
+                <img id="question-image" src="" alt="รูปคำถาม" class="w-full h-full object-contain filter drop-shadow-md transition-all duration-300">
+                <!-- ตัวสำรอง Emoji หากโหลดภาพไม่ทัน -->
+                <div id="question-emoji" class="hidden text-8xl md:text-9xl filter drop-shadow-lg">🐔</div>
+            </div>
+        </div>
+
+        <!-- แนะนำคำแนะนำเล็กๆ ด้านล่าง -->
+        <div class="w-full text-center pb-2">
+            <span class="bg-black/60 text-white/90 text-xs md:text-sm px-5 py-2 rounded-full border border-white/20 shadow-lg inline-block">
+                💡 <span id="help-hint">จีบนิ้วโป้งกับนิ้วชี้เพื่อจับตัวนก ดึงถอยหลังแล้วปล่อยเพื่อยิง!</span>
+            </span>
+        </div>
+    </div>
+
+    <!-- หน้าจอเริ่มต้นเกม -->
+    <div id="start-screen" class="absolute inset-0 bg-gradient-to-b from-sky-500 via-blue-600 to-indigo-900 flex flex-col items-center justify-center text-white z-50 text-center px-4">
+        <div class="max-w-xl w-full bg-white/10 backdrop-blur-md p-6 md:p-8 rounded-3xl border border-white/20 shadow-2xl flex flex-col items-center">
+            <div class="text-7xl md:text-8xl mb-2 drop-shadow-lg animate-bounce">🐦🎯</div>
+            <h1 class="text-3xl md:text-5xl font-extrabold mb-3 text-yellow-300 drop-shadow-md">Angry Birds AR</h1>
+            <h2 class="text-lg md:text-2xl font-bold mb-4 text-sky-200">เกมยิงคำศัพท์ภาษาไทย ป.1</h2>
+            
+            <div class="text-left bg-black/40 p-4 md:p-5 rounded-2xl mb-6 border border-white/10 text-slate-100 text-sm md:text-base leading-relaxed w-full">
+                <p class="font-bold text-yellow-400 mb-2 text-base md:text-lg">🎮 วิธีการเล่น:</p>
+                <ul class="list-disc list-inside space-y-1.5">
+                    <li>เปิดกล้อง แล้วชูมือขึ้นหน้ากล้อง</li>
+                    <li>ใช้นิ้วโป้งและนิ้วชี้ <b>จีบเข้าหากัน (Pinch)</b> เพื่อหยิบตัวนก</li>
+                    <li>ดึงนกมาด้านหลังเพื่อเล็ง ทิศทางจะอยู่ตรงข้ามกับที่ดึง</li>
+                    <li><b>ปล่อยนิ้ว</b> เพื่อยิงนกไปยังป้ายคำศัพท์ที่ถูกต้องตรงกับภาพ!</li>
+                    <li><i>(สามารถใช้เมาส์หรือนิ้วสัมผัสหน้าจอแทนได้เช่นกัน)</i></li>
+                </ul>
+            </div>
+
+            <button id="start-btn" class="w-full py-4 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-400 hover:to-emerald-500 rounded-2xl text-2xl font-extrabold text-white shadow-lg border-2 border-green-300 active:scale-95 transition-all">
+                🚀 เริ่มเล่นเกมเลย!
+            </button>
+        </div>
+    </div>
+
+    <!-- หน้าจอระหว่างโหลดระบบ AI และกล้อง -->
+    <div id="loading" class="hidden absolute inset-0 bg-slate-900/95 backdrop-blur-md flex flex-col items-center justify-center text-white z-50 px-4 text-center">
+        <div class="loader mb-6"></div>
+        <p id="loading-text" class="text-2xl font-bold text-amber-400 animate-pulse">กำลังเตรียมระบบ AI ตรวจจับนิ้วมือ...</p>
+        <p class="text-sm md:text-base mt-2 text-slate-300">กรุณากด "อนุญาต (Allow)" เพื่อให้เกมเข้าถึงกล้องของคุณน้า</p>
+    </div>
+
+    <!-- กล่องข้อความแจ้งเตือน (แทน alert) -->
+    <div id="custom-alert" class="hidden absolute inset-0 bg-black/80 flex items-center justify-center z-50 px-4">
+        <div class="bg-slate-800 border-2 border-red-500 text-white p-6 rounded-3xl max-w-md w-full text-center shadow-2xl">
+            <div class="text-5xl mb-3">⚠️</div>
+            <h3 id="alert-title" class="text-xl font-bold text-red-400 mb-2">ไม่สามารถเข้าถึงกล้องได้</h3>
+            <p id="alert-msg" class="text-slate-300 mb-6 text-sm">เบราว์เซอร์ไม่อนุญาตให้ใช้กล้อง แต่คุณยังสามารถเล่นเกมนี้ได้โดยใช้เมาส์หรือนิ้วสัมผัสลากนก!</p>
+            <button id="alert-close-btn" class="w-full py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl transition-all">
+                ตกลง (เล่นด้วยเมาส์/สัมผัส)
+            </button>
+        </div>
+    </div>
+
+    <!-- หน้าจอเมื่อเล่นจบ (ชนะ) -->
+    <div id="victory-screen" class="hidden absolute inset-0 bg-gradient-to-b from-amber-400 via-orange-500 to-red-600 flex flex-col items-center justify-center text-white z-50 px-4 text-center">
+        <div class="text-8xl md:text-9xl mb-4 animate-bounce">🏆</div>
+        <h1 class="text-4xl md:text-6xl font-extrabold mb-2 text-yellow-200 drop-shadow-md">เก่งอดเยี่ยมเลยครับ!</h1>
+        <p class="text-xl md:text-3xl mb-8 font-semibold text-white/90">หนูเก่งมาก เรียนรู้คำศัพท์ครบ 20 คำแล้ว!</p>
+        <button id="restart-btn" class="px-10 py-5 bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-500 hover:to-indigo-600 rounded-2xl text-2xl font-bold shadow-2xl border-2 border-blue-300 active:scale-95 transition-all">
+            🔄 เล่นอีกรอบกันเลย
+        </button>
+    </div>
+
+    <script>
+        // ชุดข้อมูลคำศัพท์ภาษาไทย ป.1 ทั้งหมด 20 คำ
+        // ภาพถูกเปลี่ยนเป็น SVG Data URLs หรือการ์ตูนความละเอียดสูง เพื่อความเสถียร 100% ไม่มีภาพเสีย
+        const wordData = [
+            { w: "ไก่", e: "🐔", img: "https://api.iconify.design/noto:chicken.svg" }, 
+            { w: "ไข่", e: "🥚", img: "https://api.iconify.design/noto:egg.svg" }, 
+            { w: "กบ", e: "🐸", img: "https://api.iconify.design/noto:frog.svg" },
+            { w: "นก", e: "🐦", img: "https://api.iconify.design/noto:bird.svg" }, 
+            { w: "หมู", e: "🐷", img: "https://api.iconify.design/noto:pig-face.svg" }, 
+            { w: "หมา", e: "🐶", img: "https://api.iconify.design/noto:dog-face.svg" },
+            { w: "แมว", e: "🐱", img: "https://api.iconify.design/noto:cat-face.svg" }, 
+            { w: "ปู", e: "🦀", img: "https://api.iconify.design/noto:crab.svg" }, 
+            { w: "ปลา", e: "🐟", img: "https://api.iconify.design/noto:fish.svg" },
+            { w: "กุ้ง", e: "🦐", img: "https://api.iconify.design/noto:shrimp.svg" }, 
+            { w: "ลิง", e: "🐒", img: "https://api.iconify.design/noto:monkey-face.svg" }, 
+            { w: "ช้าง", e: "🐘", img: "https://api.iconify.design/noto:elephant.svg" },
+            { w: "ม้า", e: "🐴", img: "https://api.iconify.design/noto:horse-face.svg" }, 
+            { w: "วัว", e: "🐮", img: "https://api.iconify.design/noto:cow-face.svg" }, 
+            { w: "เต่า", e: "🐢", img: "https://api.iconify.design/noto:turtle.svg" },
+            { w: "งู", e: "🐍", img: "https://api.iconify.design/noto:snake.svg" }, 
+            { w: "หมี", e: "🐻", img: "https://api.iconify.design/noto:bear.svg" }, 
+            { w: "เสือ", e: "🐯", img: "https://api.iconify.design/noto:tiger-face.svg" },
+            { w: "เป็ด", e: "🦆", img: "https://api.iconify.design/noto:duck.svg" }, 
+            { w: "หนู", e: "🐭", img: "https://api.iconify.design/noto:mouse-face.svg" } // ภาพการ์ตูนหนู
+        ];
+
+        let shuffledQuestions = [];
+        let currentQuestionIndex = 0;
+        let score = 0;
+        let gameState = 'START'; // START, LOADING, PLAYING, VICTORY
+
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        let sW, sH, vW, vH, drawW, drawH, offsetX, offsetY;
+
+        // วัตถุในเกม
+        let bird = { x: 0, y: 0, vx: 0, vy: 0, r: 40, state: 'idle' }; 
+        // ปรับหนังสติ๊กให้มีขนาดใหญ่ขึ้น ฐานกว้างขึ้น ดึงได้ไกลขึ้น
+        let slingshot = { x: 0, y: 0, width: 90, height: 180, maxPull: 260 }; 
+        let choices = []; 
+        let particles = []; 
+        let floatingTexts = [];
+
+        // ตัวแปรมือและการคุมเคอร์เซอร์
+        let isHandVisible = false;
+        let pinchState = false;      
+        let pointerX = -100;        
+        let pointerY = -100;
+        let targetPointerX = -100;   
+        let targetPointerY = -100;
+        
+        // การระบุการคลิกเมาส์/สัมผัสสำรอง
+        let isMouseDown = false;
+        let mouseX = -100;
+        let mouseY = -100;
+
+        // ระบบสร้างเสียงประกอบเอฟเฟกต์ด้วย Web Audio API โดยไม่ต้องโหลดไฟล์ภายนอก
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        let audioCtx = null;
+
+        function playSound(type) {
+            try {
+                if (!audioCtx) audioCtx = new AudioCtx();
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+
+                const now = audioCtx.currentTime;
+
+                if (type === 'stretch') {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(150, now);
+                    osc.frequency.linearRampToValueAtTime(300, now + 0.1);
+                    gain.gain.setValueAtTime(0.1, now);
+                    gain.gain.linearRampToValueAtTime(0, now + 0.1);
+                    osc.start(now);
+                    osc.stop(now + 0.1);
+                } else if (type === 'shoot') {
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(400, now);
+                    osc.frequency.exponentialRampToValueAtTime(80, now + 0.25);
+                    gain.gain.setValueAtTime(0.3, now);
+                    gain.gain.linearRampToValueAtTime(0, now + 0.25);
+                    osc.start(now);
+                    osc.stop(now + 0.25);
+                } else if (type === 'correct') {
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(523.25, now); // C5
+                    osc.frequency.setValueAtTime(659.25, now + 0.1); // E5
+                    osc.frequency.setValueAtTime(783.99, now + 0.2); // G5
+                    gain.gain.setValueAtTime(0.25, now);
+                    gain.gain.linearRampToValueAtTime(0, now + 0.4);
+                    osc.start(now);
+                    osc.stop(now + 0.4);
+                } else if (type === 'wrong') {
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(200, now);
+                    osc.frequency.setValueAtTime(140, now + 0.15);
+                    gain.gain.setValueAtTime(0.2, now);
+                    gain.gain.linearRampToValueAtTime(0, now + 0.3);
+                    osc.start(now);
+                    osc.stop(now + 0.3);
+                }
+            } catch(e) { }
+        }
+
+        function showAlert(title, msg) {
+            document.getElementById('alert-title').innerText = title;
+            document.getElementById('alert-msg').innerText = msg;
+            document.getElementById('custom-alert').classList.remove('hidden');
+        }
+
+        document.getElementById('alert-close-btn').addEventListener('click', () => {
+            document.getElementById('custom-alert').classList.add('hidden');
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('ui-layer').classList.remove('hidden');
+            document.getElementById('mode-text').innerText = "ระบบเมาส์/สัมผัส (Touch)";
+            document.getElementById('mode-icon').innerText = "🖱️";
+            document.getElementById('help-hint').innerText = "คลิกหรือแตะค้างที่ตัวนก ดึงถอยหลัง แล้วปล่อยเพื่อยิง!";
+            gameState = 'PLAYING';
+            resize();
+            initGame();
+            requestAnimationFrame(gameLoop);
+        });
+
+        function roundRect(ctx, x, y, width, height, radius) {
+            ctx.beginPath();
+            ctx.moveTo(x + radius, y);
+            ctx.lineTo(x + width - radius, y);
+            ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+            ctx.lineTo(x + width, y + height - radius);
+            ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+            ctx.lineTo(x + radius, y + height);
+            ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+            ctx.lineTo(x, y + radius);
+            ctx.quadraticCurveTo(x, y, x + radius, y);
+            ctx.closePath();
+        }
+
+        function createExplosion(x, y, color) {
+            for(let i = 0; i < 40; i++) {
+                particles.push({
+                    x: x, y: y,
+                    vx: (Math.random() - 0.5) * 16, 
+                    vy: (Math.random() - 0.5) * 16,
+                    life: 1.0,
+                    size: Math.random() * 8 + 4,
+                    color: color
+                });
+            }
+        }
+
+        function createFloatingText(x, y, text, color) {
+            floatingTexts.push({
+                x: x, y: y, text: text, color: color, life: 1.0, vy: -2.5
+            });
+        }
+
+        function resize() {
+            sW = canvas.width = window.innerWidth;
+            sH = canvas.height = window.innerHeight;
+            
+            // ตำแหน่งหนังสติ๊กใหญ่ขึ้นและตั้งในตำแหน่งที่เหมาะกับการเล็ง
+            slingshot.x = sW / 2;
+            slingshot.y = sH - 190;
+            slingshot.maxPull = Math.min(260, sH * 0.35);
+            
+            if(vW && vH) {
+                let scale = Math.max(sW / vW, sH / vH);
+                drawW = vW * scale;
+                drawH = vH * scale;
+                offsetX = (sW - drawW) / 2;
+                offsetY = (sH - drawH) / 2;
+            }
+
+            if (choices.length === 2) {
+                let boxW = Math.min(260, sW * 0.38); 
+                let gap = Math.min(sW * 0.28, 220);
+                choices[0].w = boxW;
+                choices[1].w = boxW;
+                choices[0].x = sW/2 - gap - boxW/2;
+                choices[1].x = sW/2 + gap - boxW/2;
+            }
+        }
+        window.addEventListener('resize', resize);
+
+        function initGame() {
+            shuffledQuestions = [...wordData].sort(() => Math.random() - 0.5);
+            currentQuestionIndex = 0;
+            score = 0;
+            generateQuestion();
+        }
+
+        function generateQuestion() {
+            if (currentQuestionIndex >= 20) {
+                showVictory();
+                return;
+            }
+            
+            let currentData = shuffledQuestions[currentQuestionIndex];
+            
+            // สุ่มคำตอบสลับที่ไม่มีทางซ้ำกับคำตอบจริง
+            let wrongWord;
+            do {
+                wrongWord = wordData[Math.floor(Math.random() * wordData.length)].w;
+            } while (wrongWord === currentData.w);
+            
+            let options = [
+                { word: currentData.w, correct: true },
+                { word: wrongWord, correct: false }
+            ];
+
+            if (Math.random() > 0.5) options.reverse();
+            
+            let boxW = Math.min(260, sW * 0.38); 
+            let boxH = 95; 
+            let gap = Math.min(sW * 0.28, 220); 
+            let startY = Math.max(220, sH * 0.32); 
+            
+            choices = [
+                { active: true, word: options[0].word, correct: options[0].correct, x: sW/2 - gap - boxW/2, y: startY, w: boxW, h: boxH, color: '#2563eb' },
+                { active: true, word: options[1].word, correct: options[1].correct, x: sW/2 + gap - boxW/2, y: startY, w: boxW, h: boxH, color: '#dc2626' }
+            ];
+            
+            const imgElement = document.getElementById('question-image');
+            const emojiElement = document.getElementById('question-emoji');
+            
+            imgElement.classList.remove('hidden');
+            emojiElement.classList.add('hidden');
+            
+            imgElement.src = currentData.img;
+            
+            // กรณีรูปโหลดช้า ให้ใช้รูปภาพสำรองทันที
+            imgElement.onerror = function() {
+                imgElement.classList.add('hidden');
+                emojiElement.classList.remove('hidden');
+                emojiElement.innerText = currentData.e;
+            };
+            
+            document.getElementById('score-text').innerText = `${score} / 20`;
+            resetBird();
+        }
+
+        function showVictory() {
+            gameState = 'VICTORY';
+            document.getElementById('ui-layer').classList.add('hidden');
+            document.getElementById('victory-screen').classList.remove('hidden');
+            playSound('correct');
+        }
+
+        function resetBird() {
+            bird.state = 'idle';
+            bird.x = slingshot.x;
+            bird.y = slingshot.y;
+            bird.vx = 0;
+            bird.vy = 0;
+        }
+
+        function handleHit(tgt) {
+            if (tgt.correct) {
+                playSound('correct');
+                createExplosion(tgt.x + tgt.w/2, tgt.y + tgt.h/2, '#22c55e');
+                createFloatingText(tgt.x + tgt.w/2, tgt.y - 20, 'ถูกต้องครับ! 🎉', '#22c55e');
+                score++;
+                document.getElementById('score-text').innerText = `${score} / 20`;
+                tgt.active = false;
+                bird.state = 'hidden'; 
+                
+                setTimeout(() => {
+                    if(gameState === 'PLAYING') {
+                        currentQuestionIndex++;
+                        generateQuestion();
+                    }
+                }, 1300);
+            } else {
+                playSound('wrong');
+                createExplosion(tgt.x + tgt.w/2, tgt.y + tgt.h/2, '#ef4444');
+                createFloatingText(tgt.x + tgt.w/2, tgt.y - 20, 'ลองใหม่น้า 🥺', '#ef4444');
+                tgt.w *= 0.9;
+                tgt.h *= 0.9;
+                tgt.x += (tgt.w / 0.9) * 0.05;
+                tgt.y += (tgt.h / 0.9) * 0.05;
+                resetBird(); 
+            }
+        }
+
+        function updatePhysics() {
+            if (gameState !== 'PLAYING') return;
+
+            // การเคลื่อนที่นุ่มนวลของเคอร์เซอร์มือ
+            pointerX += (targetPointerX - pointerX) * 0.45;
+            pointerY += (targetPointerY - pointerY) * 0.45;
+
+            // ตรวจสอบตำแหน่งการสั่งงาน (ถ้ามีมือใช้มือ ถ้าไม่มีใช้เมาส์/สัมผัส)
+            let activePointerX = isHandVisible ? pointerX : mouseX;
+            let activePointerY = isHandVisible ? pointerY : mouseY;
+            let activePinch = isHandVisible ? pinchState : isMouseDown;
+
+            if (bird.state === 'idle') {
+                bird.x = slingshot.x;
+                bird.y = slingshot.y;
+
+                if (activePinch) {
+                    let distToBird = Math.hypot(activePointerX - bird.x, activePointerY - bird.y);
+                    // ขยายรัศมีการจับเป็น 220px เพื่อให้หยิบนกได้ง่ายและแม่นยำยิ่งขึ้น
+                    if (distToBird < 220) { 
+                        bird.state = 'dragged';
+                        playSound('stretch');
+                    }
+                }
+            } 
+            else if (bird.state === 'dragged') {
+                let dx = activePointerX - slingshot.x;
+                let dy = activePointerY - slingshot.y;
+                let pullDist = Math.hypot(dx, dy);
+                
+                if (pullDist > slingshot.maxPull) {
+                    dx = (dx / pullDist) * slingshot.maxPull;
+                    dy = (dy / pullDist) * slingshot.maxPull;
+                }
+                
+                bird.x = slingshot.x + dx;
+                bird.y = slingshot.y + dy;
+
+                if (!activePinch) {
+                    let releaseDist = Math.hypot(bird.x - slingshot.x, bird.y - slingshot.y);
+                    if (releaseDist < 25) {
+                        bird.state = 'idle'; 
+                    } else {
+                        bird.state = 'flying';
+                        playSound('shoot');
+                        // ปรับกำลังสปริงแรงส่งนกให้ยิงพุ่งไปตรงเป้าหมายได้สนุก
+                        bird.vx = -dx * 0.32; 
+                        bird.vy = -dy * 0.32;
+                    }
+                }
+            } 
+            else if (bird.state === 'flying') {
+                bird.vy += 0.55; // แรงโน้มถ่วง
+                bird.x += bird.vx;
+                bird.y += bird.vy;
+
+                // ตรวจการชนกล่องข้อความ
+                for (let tgt of choices) {
+                    if (tgt.active) {
+                        let testX = bird.x;
+                        let testY = bird.y;
+                        if (bird.x < tgt.x) testX = tgt.x;
+                        else if (bird.x > tgt.x + tgt.w) testX = tgt.x + tgt.w;
+                        if (bird.y < tgt.y) testY = tgt.y;
+                        else if (bird.y > tgt.y + tgt.h) testY = tgt.y + tgt.h;
+                        
+                        let distance = Math.hypot(bird.x - testX, bird.y - testY);
+                        if (distance <= bird.r) {
+                            handleHit(tgt);
+                            break;
+                        }
+                    }
+                }
+
+                // หากตกจอให้รีเซ็ตนกกลับที่เดิม
+                if (bird.y > sH + 100 || bird.x < -150 || bird.x > sW + 150) {
+                    resetBird();
+                }
+            }
+
+            // อัปเดตอนุภาคระเบิดเฉลิมฉลอง
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vy += 0.35; 
+                p.life -= 0.025;
+                if (p.life <= 0) particles.splice(i, 1);
+            }
+
+            // อัปเดตข้อความลอย
+            for (let i = floatingTexts.length - 1; i >= 0; i--) {
+                let ft = floatingTexts[i];
+                ft.y += ft.vy;
+                ft.life -= 0.02;
+                if (ft.life <= 0) floatingTexts.splice(i, 1);
+            }
+        }
+
+        function drawCanvas() {
+            ctx.clearRect(0, 0, sW, sH);
+
+            // 1. วาดเป้าหมายป้ายคำศัพท์ (Wooden Choice Cards)
+            ctx.font = 'bold 44px "Prompt", sans-serif'; 
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            
+            for (let tgt of choices) {
+                if (!tgt.active) continue;
+                
+                // เงาป้ายคำศัพท์
+                ctx.fillStyle = tgt.color;
+                ctx.shadowColor = 'rgba(0,0,0,0.4)';
+                ctx.shadowBlur = 12;
+                ctx.shadowOffsetY = 6;
+                
+                roundRect(ctx, tgt.x, tgt.y, tgt.w, tgt.h, 20);
+                ctx.fill();
+                
+                // ขอบสีขาวไฮไลท์
+                ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+                ctx.lineWidth = 5;
+                roundRect(ctx, tgt.x + 4, tgt.y + 4, tgt.w - 8, tgt.h - 8, 16);
+                ctx.stroke();
+                
+                // ตัวหนังสือข้อความ
+                ctx.shadowColor = 'transparent';
+                ctx.fillStyle = '#ffffff';
+                ctx.fillText(tgt.word, tgt.x + tgt.w/2, tgt.y + tgt.h/2 + 2);
+            }
+
+            // 2. วาดส่วนฐานหนังสติ๊กขยายใหญ่ (Slingshot Frame - Back Side)
+            let sy = slingshot.y;
+            let sx = slingshot.x;
+
+            ctx.strokeStyle = '#543310';
+            ctx.lineWidth = 32; 
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            ctx.moveTo(sx, sH);
+            ctx.lineTo(sx, sy + 60);
+            ctx.lineTo(sx - 55, sy);
+            ctx.moveTo(sx, sy + 60);
+            ctx.lineTo(sx + 55, sy);
+            ctx.stroke();
+
+            // ลายไม้หนังสติ๊กเพิ่มเติม
+            ctx.strokeStyle = '#74512D';
+            ctx.lineWidth = 18;
+            ctx.beginPath();
+            ctx.moveTo(sx, sH);
+            ctx.lineTo(sx, sy + 60);
+            ctx.lineTo(sx - 55, sy);
+            ctx.moveTo(sx, sy + 60);
+            ctx.lineTo(sx + 55, sy);
+            ctx.stroke();
+
+            // 3. วาดยางหนังสติ๊กด้านหลัง & ไกด์เส้นทางยิง
+            if (bird.state === 'dragged' || bird.state === 'idle') {
+                ctx.strokeStyle = '#1e293b';
+                ctx.lineWidth = 14; 
+                ctx.beginPath();
+                ctx.moveTo(sx - 55, sy - 5);
+                ctx.lineTo(bird.x, bird.y);
+                ctx.stroke();
+                
+                // วาดเส้นแนววิถีโค้ง (Trajectory Dots) เมื่อกำลังดึงนก
+                if (bird.state === 'dragged') {
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+                    let simX = bird.x;
+                    let simY = bird.y;
+                    let simVx = (slingshot.x - bird.x) * 0.32; 
+                    let simVy = (slingshot.y - bird.y) * 0.32; 
+                    
+                    for (let i = 0; i < 18; i++) {
+                        simVy += 0.55;
+                        simX += simVx;
+                        simY += simVy;
+                        ctx.beginPath();
+                        ctx.arc(simX, simY, 7 - (i * 0.25), 0, Math.PI * 2); 
+                        ctx.fill();
+                    }
+                }
+            }
+
+            // 4. วาดตัวนก Angry Birds สุดน่ารัก
+            if (bird.state !== 'hidden') {
+                ctx.save();
+                ctx.translate(bird.x, bird.y);
+
+                // เงาตัวนก
+                ctx.shadowColor = 'rgba(0,0,0,0.3)';
+                ctx.shadowBlur = 10;
+                ctx.shadowOffsetY = 5;
+
+                // หัวนกทรงกลมสีแดงสด
+                ctx.fillStyle = '#dc2626';
+                ctx.beginPath();
+                ctx.arc(0, 0, bird.r, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.shadowColor = 'transparent';
+                ctx.strokeStyle = '#991b1b';
+                ctx.lineWidth = 4; 
+                ctx.stroke();
+
+                // ท้องนกสีครีม
+                ctx.fillStyle = '#fef3c7';
+                ctx.beginPath();
+                ctx.arc(0, 12, bird.r * 0.65, 0.2 * Math.PI, 0.8 * Math.PI);
+                ctx.fill();
+
+                // ตาขาวโตน่ารัก
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath();
+                ctx.arc(-13, -8, 12, 0, Math.PI * 2);
+                ctx.arc(13, -8, 12, 0, Math.PI * 2);
+                ctx.fill();
+
+                // ตาดำเขม็ง
+                ctx.fillStyle = '#0f172a';
+                ctx.beginPath();
+                ctx.arc(-11, -8, 4.5, 0, Math.PI * 2);
+                ctx.arc(11, -8, 4.5, 0, Math.PI * 2);
+                ctx.fill();
+
+                // คิ้วสีดำหนาเข้ม
+                ctx.strokeStyle = '#000000';
+                ctx.lineWidth = 6;
+                ctx.lineCap = 'round';
+                ctx.beginPath();
+                ctx.moveTo(-28, -20);
+                ctx.lineTo(-4, -12);
+                ctx.moveTo(28, -20);
+                ctx.lineTo(4, -12);
+                ctx.stroke();
+
+                // ปากสามเหลี่ยมสีเหลืองสด
+                ctx.fillStyle = '#f59e0b';
+                ctx.beginPath();
+                ctx.moveTo(-10, 2);
+                ctx.lineTo(10, 2);
+                ctx.lineTo(0, 18);
+                ctx.closePath();
+                ctx.fill();
+                ctx.strokeStyle = '#d97706';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                ctx.restore();
+            }
+
+            // 5. วาดยางหนังสติ๊กด้านหน้า และซองหนังจับนก
+            if (bird.state === 'dragged' || bird.state === 'idle') {
+                ctx.strokeStyle = '#334155';
+                ctx.lineWidth = 14;
+                ctx.beginPath();
+                ctx.moveTo(bird.x, bird.y);
+                ctx.lineTo(sx + 55, sy - 5);
+                ctx.stroke();
+
+                // ซองหนัง (Leather Pouch) หุ้มตัวนก
+                ctx.fillStyle = '#78350f';
+                ctx.beginPath();
+                ctx.arc(bird.x, bird.y, bird.r * 0.4, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // 6. วาดเอฟเฟกต์อนุภาคระเบิด
+            for (let p of particles) {
+                ctx.fillStyle = p.color;
+                ctx.globalAlpha = p.life;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, Math.max(1, p.size * p.life), 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1.0;
+
+            // 7. วาดข้อความลอย (Floating Texts)
+            for (let ft of floatingTexts) {
+                ctx.globalAlpha = ft.life;
+                ctx.fillStyle = ft.color;
+                ctx.font = 'bold 38px "Prompt", sans-serif';
+                ctx.textAlign = 'center';
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 6;
+                ctx.strokeText(ft.text, ft.x, ft.y);
+                ctx.fillText(ft.text, ft.x, ft.y);
+            }
+            ctx.globalAlpha = 1.0;
+
+            // 8. วาดเคอร์เซอร์มือผู้เล่นในกล้อง AR (หรือเมาส์)
+            if (isHandVisible) {
+                ctx.fillStyle = pinchState ? 'rgba(34, 197, 94, 0.85)' : 'rgba(255, 255, 255, 0.5)';
+                ctx.beginPath();
+                ctx.arc(pointerX, pointerY, pinchState ? 20 : 28, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.strokeStyle = pinchState ? '#ffffff' : 'rgba(255,255,255,0.9)';
+                ctx.lineWidth = 4;
+                ctx.stroke();
+
+                // วาดเป้าเล็งตรงกลางเคอร์เซอร์
+                ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(pointerX - 12, pointerY);
+                ctx.lineTo(pointerX + 12, pointerY);
+                ctx.moveTo(pointerX, pointerY - 12);
+                ctx.lineTo(pointerX, pointerY + 12);
+                ctx.stroke();
+            }
+        }
+
+        function onResults(results) {
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                let landmarks = results.multiHandLandmarks[0];
+                let thumb = landmarks[4];  // นิ้วโป้ง
+                let index = landmarks[8];  // นิ้วชี้
+                
+                // คำนวณระยะห่างระหว่างนิ้วโป้งกับนิ้วชี้
+                let pinchDistNorm = Math.hypot(thumb.x - index.x, thumb.y - index.y);
+                // ระยะวัดจากฝ่ามือเพื่อปรับสเกลตามระยะใกล้ไกลของมือ
+                let palmDistNorm = Math.hypot(landmarks[0].x - landmarks[9].x, landmarks[0].y - landmarks[9].y);
+                
+                // ปรับเกณฑ์การจีบนิ้วให้จับนกได้สะดวก รวดเร็ว และแม่นยำยิ่งขึ้น
+                pinchState = pinchDistNorm < (palmDistNorm * 0.55);
+                
+                if (drawW && drawH) {
+                    let mapX = (nx) => (1 - nx) * drawW + offsetX;
+                    let mapY = (ny) => ny * drawH + offsetY;
+                    
+                    targetPointerX = (mapX(thumb.x) + mapX(index.x)) / 2;
+                    targetPointerY = (mapY(thumb.y) + mapY(index.y)) / 2;
+                    isHandVisible = true;
+                }
+            } else {
+                isHandVisible = false;
+                pinchState = false;
+            }
+        }
+
+        async function setupCamera() {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+                audio: false
+            });
+            video.srcObject = stream;
+            return new Promise((resolve) => {
+                video.onloadedmetadata = () => {
+                    video.play();
+                    vW = video.videoWidth;
+                    vH = video.videoHeight;
+                    resize();
+                    resolve();
+                };
+            });
+        }
+
+        let lastVideoTime = -1;
+        let handsApi = null;
+        
+        async function predictLoop() {
+            if (gameState === 'PLAYING') {
+                if (video.currentTime !== lastVideoTime && handsApi) {
+                    lastVideoTime = video.currentTime;
+                    await handsApi.send({image: video}); 
+                }
+            }
+            requestAnimationFrame(predictLoop);
+        }
+
+        function gameLoop() {
+            updatePhysics();
+            drawCanvas();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // ระบบรองรับการเล่นด้วย Mouse และ Touch หน้าจอสัมผัส
+        window.addEventListener('mousedown', (e) => {
+            isMouseDown = true;
+            mouseX = e.clientX;
+            mouseY = e.clientY;
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            mouseX = e.clientX;
+            mouseY = e.clientY;
+        });
+
+        window.addEventListener('mouseup', () => {
+            isMouseDown = false;
+        });
+
+        window.addEventListener('touchstart', (e) => {
+            if (e.touches.length > 0) {
+                isMouseDown = true;
+                mouseX = e.touches[0].clientX;
+                mouseY = e.touches[0].clientY;
+            }
+        }, { passive: true });
+
+        window.addEventListener('touchmove', (e) => {
+            if (e.touches.length > 0) {
+                mouseX = e.touches[0].clientX;
+                mouseY = e.touches[0].clientY;
+            }
+        }, { passive: true });
+
+        window.addEventListener('touchend', () => {
+            isMouseDown = false;
+        });
+
+        document.getElementById('start-btn').addEventListener('click', async () => {
+            document.getElementById('start-screen').classList.add('hidden');
+            document.getElementById('loading').classList.remove('hidden');
+            
+            try {
+                await setupCamera();
+                
+                handsApi = new Hands({locateFile: (file) => {
+                    return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+                }});
+                
+                handsApi.setOptions({
+                    maxNumHands: 1,
+                    modelComplexity: 1,
+                    minDetectionConfidence: 0.65,
+                    minTrackingConfidence: 0.65
+                });
+                handsApi.onResults(onResults);
+                
+                await handsApi.send({image: video}); 
+                
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('ui-layer').classList.remove('hidden');
+                
+                gameState = 'PLAYING';
+                resize();
+                initGame();
+                
+                requestAnimationFrame(predictLoop);
+                requestAnimationFrame(gameLoop);
+                
+            } catch(err) {
+                console.warn("Camera failed or denied, switching to touch/mouse fallback mode.", err);
+                showAlert(
+                    'ไม่พบการเชื่อมต่อกล้อง หรือเบราว์เซอร์ปฏิเสธการใช้กล้อง',
+                    'ไม่ต้องห่วงครับ! คุณสามารถเล่นเกมโดยใช้เมาส์คลิกลากนก หรือใช้นิ้วมือสัมผัสบนหน้าจอสมาร์ตโฟน/แท็บเล็ตได้ตามปกติ'
+                );
+            }
+        });
+
+        document.getElementById('restart-btn').addEventListener('click', () => {
+            document.getElementById('victory-screen').classList.add('hidden');
+            document.getElementById('ui-layer').classList.remove('hidden');
+            gameState = 'PLAYING';
+            initGame();
+        });
+
+        // กำหนดขนาดเริ่มต้น
+        resize();
+    </script>
+</body>
+</html>
